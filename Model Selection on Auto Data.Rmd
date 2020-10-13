@@ -1,0 +1,366 @@
+---
+title: "Regression Methods on Prostate Cancer Data"
+author: "Shreyas Srinivasan"
+output: pdf_document
+---
+
+## Dataset
+
+The `Auto` dataset is available in the `ISLR` package. The dataset contains 392 observations with 9 attributes for each observation. The attributes are briefly described below:
+
+1. mpg - miles per gallon
+
+2. cylinders - Number of cylinders between 4 and 8
+
+3. displacement - Engine displacement (cu. inches)
+
+4. horsepower - Engine horsepower
+
+5. weight - Vehicle weight (lbs.)
+
+6. acceleration - Time to accelerate from 0 to 60 mph (sec.)
+
+7. year - Model year (modulo 100)
+
+8. origin - Origin of car (1. American, 2. European, 3. Japanese)
+
+9. name - Vehicle name
+
+Our goal is to build a model that can predict `mpg`. We want to be able to predict the mileage of a vehicle from other attributes. 
+
+```{r, include=FALSE, echo=FALSE}
+rm(list=ls()) #clear environment
+
+library(ISLR)
+library(DAAG)
+library(PerformanceAnalytics)
+
+#read dataset
+auto <- Auto
+```
+
+```{r, include=TRUE, echo=TRUE}
+#exploratory analysis
+chart.Correlation(Auto[, -9])
+```
+From the graph above, we see that a bunch of predictors are highly correlated with each other. For example, weight and displacement have a correlation coefficient of 0.93. This suggests that 1 (or more) predictors may not be useful in predicting mpg. When we look at the relationship between the response (mpg) and other variables, acceleration does not show a strong relationship with mpg. Every other variable has a correlation coefficient > 0.50 with mpg.
+```{r, include=FALSE, echo=FALSE}
+
+head(auto)      #look at the head of the dataset
+str(auto)       #look at the structure of the data
+summary(auto)   #Get a feel of the range of the variables in the dataset
+```
+
+We will consider the following regression methods:
+
+#### (a) Standard Least Squares
+#### (b) Best-subset selection
+#### (c) Ridge regression
+#### (d) Lasso regularization
+#### (e) Principal Component Regression (PCR)
+#### (f) Partial Least Squares (PLS)\newline
+After we fit the 6 different models, we will compare model metrics and look at which model performed the best on this dataset.
+
+## Fitting Different Models
+
+#### (a) Standard Least Squares
+We fit the data using the usual least-squares method. From a previous analysis, we know that we require quadratic terms for horsepower, displacement, and weight.
+```{r, include=FALSE, echo=FALSE}
+#fit leaset squares model
+auto.lm <-lm(mpg ~ cylinders + poly(displacement, 2) + poly(horsepower, 2) + poly(weight, 2) + acceleration + year + as.factor(origin), data = Auto)
+summary(auto.lm)
+
+auto.lm.coef <- auto.lm$coefficients        #store coefficients
+cv.lm <- cv.lm(auto, auto.lm, m=10, seed=1) #cross validation to determine test error rate
+test.error.lm <- 8.72                       #store cv test error rate
+```
+
+```{r, include=FALSE, echo=FALSE}
+X <- data.frame(model.matrix(auto.lm)[, -1])
+pred.num <- ncol(X)
+Y = Auto[, 1]
+
+# best-subset selection
+library(leaps)
+best.sub = regsubsets(Y ~ ., data = X, nvmax = pred.num, method = "exhaustive")
+summary(best.sub)
+```
+#### (b) Best-subset selection
+On using best-subset selection, we see that once the number of variables is more than 3, the increase in $R^2$ is not significant. We will then go ahead and fit the model with 3 vairables. This model has the `year` variable, and two terms of the `weight` variable.
+```{r, include=TRUE, echo=TRUE}
+#plot to see how many variables to pick
+best.sub.adjr2 = summary(best.sub)$adjr2
+plot(best.sub.adjr2, pch = 19, type = "b", xlab = "Model number", ylab = "Adjuster R squared", col = 1)
+```
+
+```{r, include=FALSE, echo=FALSE}
+#build model using 3 variables (optimal case)
+coef(best.sub, 3)
+auto.bestsubset <-lm(mpg ~ poly(weight, 2) + year, data = Auto)
+summary(auto.bestsubset)
+
+auto.bestsubset.coef <- auto.bestsubset$coefficients        #store coefficients
+cv.bestsubset <- cv.lm(auto, auto.bestsubset, m=10, seed=1) #cross validation to determine test error rate
+test.error.bestsubset <- 9.3                                #store cv test error rate
+```
+
+```{r, include=FALSE, echo=FALSE}
+#ridge regression
+library(glmnet)
+
+#get sets x and y in the proper form
+y <- auto$mpg
+x <- model.matrix(mpg ~ cylinders + poly(displacement, 2) + poly(horsepower, 2) + poly(weight, 2) + acceleration + year + as.factor(origin), auto)[, -1]
+
+#grid of lambdas
+grid <- 10^seq(10, -2, length = 100)
+#perform ridge regression
+ridge.mod <- glmnet(x, y, alpha = 0, lambda = grid)
+
+#visualize how predictors shrink towards 0
+plot(ridge.mod, xvar = "lambda")
+
+#perform cv to find  the best lambda
+set.seed(1)
+cv.out <- cv.glmnet(x, y, alpha = 0)
+bestlam <- cv.out$lambda.min
+
+#the fit best ridge regression model using best lambda
+auto.ridge <- glmnet(x, y, alpha = 0, lambda = bestlam)
+auto.ridge.coef <- predict(auto.ridge, type = "coefficients", s = bestlam)
+
+#initialize array to store 10 cv errors
+cv.ridge.errors = seq(1,10)
+
+#create 10 folds for 10-fold CV
+library(caret)
+set.seed(1)
+folds <- createFolds(auto$mpg, k=10)
+
+#perform cross validation (manually)
+i=1
+for(val in folds)
+{
+  #get sets in proper form
+  new.y <- auto$mpg[-(c(val))]
+  new.x <- model.matrix(mpg ~ cylinders + poly(displacement, 2) + poly(horsepower, 2) + poly(weight, 2) + acceleration + year + as.factor(origin), auto)[-(c(val)), -1]
+
+  #fit ridge regression model to training part of the data
+  test.ridge <- glmnet(new.x, new.y, alpha = 0, lambda = bestlam)
+  
+  #get set in proper form
+  newx.model <- model.matrix(mpg ~ cylinders + poly(displacement, 2) + poly(horsepower, 2) + poly(weight, 2) + acceleration + year + as.factor(origin), auto)[c(val), -1]
+  
+  #perform predictions on the fold that is left out
+  test.ridge.pred <- predict(test.ridge, s = bestlam, newx = newx.model)
+  #store test error
+  cv.ridge.errors[i] = mean((test.ridge.pred - auto$mpg[(c(val))])^2)
+  i=i+1
+}
+#get the average test error rate
+test.error.ridge <- mean(cv.ridge.errors)
+```
+#### (c) Ridge regression
+On imposing the ridge penalty, we expect that the predictors will be shrunken significantly. We will compare them with the usual least square predictors at the end.
+```{r, include=FALSE, echo=FALSE}
+#lasso regression
+library(glmnet)
+
+#get sets x and y in the proper form
+y <- auto$mpg
+x <- model.matrix(mpg ~ cylinders + poly(displacement, 2) + poly(horsepower, 2) + poly(weight, 2) + acceleration + year + as.factor(origin), auto)[, -1]
+
+#grid of lambdas
+grid <- 10^seq(10, -2, length = 100)
+#perform lasso regression
+lasso.mod <- glmnet(x, y, alpha = 1, lambda = grid)
+
+#visualize how predictors shrink towards 0
+plot(lasso.mod, xvar = "lambda")
+
+#perform cv to find  the best lambda
+set.seed(1)
+cv.out <- cv.glmnet(x, y, alpha = 1)
+bestlam <- cv.out$lambda.min
+
+#the fit best lasso regression model using best lambda
+auto.lasso <- glmnet(x, y, alpha = 1, lambda = bestlam)
+auto.lasso.coef <- predict(auto.lasso, type = "coefficients", s = bestlam)
+
+#initialize array to store 10 cv errors
+cv.lasso.errors = seq(1,10)
+
+#create 10 folds for 10-fold CV
+library(caret)
+set.seed(2)
+folds <- createFolds(auto$mpg, k=10)
+
+#perform cross validation (manually)
+i=1
+for(val in folds)
+{
+  #get sets in proper form
+  new.y <- auto$mpg[-(c(val))]
+  new.x <- model.matrix(mpg ~ cylinders + poly(displacement, 2) + poly(horsepower, 2) + poly(weight, 2) + acceleration + year + as.factor(origin), auto)[-(c(val)), -1]
+
+  #fit lasso regression model to training part of the data
+  test.lasso <- glmnet(new.x, new.y, alpha = 1, lambda = bestlam)
+  
+  #get set in proper form
+  newx.model <- model.matrix(mpg ~ cylinders + poly(displacement, 2) + poly(horsepower, 2) + poly(weight, 2) + acceleration + year + as.factor(origin), auto)[c(val), -1]
+  
+  #perform predictions on the fold that is left out
+  test.lasso.pred <- predict(test.lasso, s = bestlam, newx = newx.model)
+  #store test error
+  cv.lasso.errors[i] = mean((test.lasso.pred - auto$mpg[(c(val))])^2)
+  i=i+1
+}
+#get the average test error rate
+test.error.lasso <- mean(cv.lasso.errors)
+```
+#### (d) Lasso regularization
+On imposing the lasso penalty, we know that variable selection kicks in. Once again, we will compare coefficients in the end to see which variables have been selected.
+```{r, include=FALSE, echo=FALSE}
+library(pls)
+
+#fit pcr
+set.seed(1)
+pcr.fit <- pcr(mpg ~ cylinders + poly(displacement, 2) + poly(horsepower, 2) + poly(weight, 2) + acceleration + year + as.factor(origin), 
+               data = auto, scale = TRUE, validation = "CV", segments = 10)
+summary(pcr.fit)
+
+#look at least MSE and pick corresponding number of components
+MSEP(pcr.fit)
+sqrt(MSEP(pcr.fit)$val[1, 1,])
+which.min(MSEP(pcr.fit)$val[1, 1,])
+```
+#### (e) Principal Component Regression (PCR)
+When we fit the model using PCR, we see that using the first 9 components yields the lowest error rate (computed from cross-validation).
+```{r, include=TRUE, echo=TRUE}
+#Look at the MSEP plot
+validationplot(pcr.fit, val.type = "MSEP")
+```
+
+```{r, include=FALSE, echo=FALSE}
+#fit best pcr model (9 components)
+auto.pcr <- pcr(mpg ~ cylinders + poly(displacement, 2) + poly(horsepower, 2) + poly(weight, 2) + acceleration + year + as.factor(origin), 
+               data = auto, scale = TRUE, ncomp = 9)
+#store coefficients for best pcr model
+auto.pcr.coef <- auto.pcr$coefficients[89:99]
+
+
+#initialize array to store 10 cv errors
+cv.pcr.errors = seq(1,10)
+
+#create 10 folds for 10-fold CV
+library(caret)
+set.seed(3)
+folds <- createFolds(auto$mpg, k=10)
+
+#perform cross validation (manually)
+i=1
+for(val in folds)
+{
+  #fit pcr model to training part of the data
+  test.pcr <- pcr(mpg ~ cylinders + poly(displacement, 2) + poly(horsepower, 2) + poly(weight, 2) + acceleration + year + as.factor(origin), 
+               data = auto[-(c(val)), ], scale = TRUE, ncomp = 9)
+  
+  #perform predictions on the fold that is left out
+  test.pcr.pred <- predict(test.pcr, auto[c(val),], ncomp=9)
+  #store test error
+  cv.pcr.errors[i] = mean((test.pcr.pred - auto$mpg[(c(val))])^2)
+  i=i+1
+}
+#get the average test error rate
+test.error.pcr <- mean(cv.pcr.errors)
+```
+
+```{r, echo=FALSE, include=FALSE}
+set.seed(1)
+#fit pls
+pls.fit <- plsr(mpg ~ cylinders + poly(displacement, 2) + poly(horsepower, 2) + poly(weight, 2) + acceleration + year + as.factor(origin), 
+               data = auto, scale = TRUE, validation = "CV", segments = 10)
+summary(pls.fit)
+
+#look at least MSE and pick corresponding number of components
+MSEP(pls.fit)
+sqrt(MSEP(pls.fit)$val[1, 1,])
+which.min(MSEP(pls.fit)$val[1, 1,])
+```
+#### (f) Partial Least Squares (PLS)
+When we fit the model using PLS, we see that using the first 7 components yields the lowest error rate (computed from cross-validation).
+```{r, echo=TRUE, include=TRUE}
+#Look at the MSEP plot
+validationplot(pls.fit, val.type = "MSEP")
+```
+
+```{r, echo=FALSE, include=FALSE}
+#fit best pls model (7 components)
+auto.pls <- plsr(mpg ~ cylinders + poly(displacement, 2) + poly(horsepower, 2) + poly(weight, 2) + acceleration + year + as.factor(origin), 
+               data = auto, scale = TRUE, ncomp = 7)
+#store coefficients for best pls model
+auto.pls.coef <- auto.pls$coefficients[67:77]
+
+#initialize array to store 10 cv errors
+cv.pls.errors = seq(1,10)
+
+#create 10 folds for 10-fold CV
+library(caret)
+set.seed(4)
+folds <- createFolds(auto$mpg, k=10)
+
+#perform cross validation (manually)
+i=1
+for(val in folds)
+{
+  #fit pls model to training part of the data
+  test.pls <- plsr(mpg ~ cylinders + poly(displacement, 2) + poly(horsepower, 2) + poly(weight, 2) + acceleration + year + as.factor(origin), 
+               data = auto[-(c(val)), ], scale = TRUE, ncomp = 9)
+  
+  #perform predictions on the fold that is left out
+  test.pls.pred <- predict(test.pls, auto[c(val),], ncomp=9)
+  #store test error
+  cv.pls.errors[i] = mean((test.pls.pred - auto$mpg[(c(val))])^2)
+  i=i+1
+}
+#get the average test error rate
+test.error.pls <- mean(cv.pls.errors)
+```
+
+## Comparision
+```{r, include=FALSE, echo=FALSE}
+
+auto.lm.coef
+auto.bestsubset.coef
+auto.ridge.coef
+auto.lasso.coef
+auto.pcr.coef
+auto.pls.coef
+
+test.error.lm
+test.error.bestsubset
+test.error.ridge
+test.error.lasso
+test.error.pcr
+test.error.pls
+```
+Finally, we take a look at the coefficients from the 6 methods we used in (a)-(f). We also list the test error rates - computed through cross-validation - to see which method performs the best. All the MSE's (Test Error) were calculated using 10-fold cross-validation. 
+
+| Term | LS | Best Subset | Ridge | Lasso | PCR | PLS |
+|----------------|-----------------------------------------------------------------------|---------------------------------------------------------|-------------------------------------|-------------------------------------|-------------------------------------|-------------------------------------|
+| Intercept              | -35.814  | -39.536  | -28.111 | -35.294 |        |        |
+| cylinders              |  0.347   |          | -0.079  |  0.192  |  0.693 |  0.734 |
+| poly(displacement, 2)1 | -5.217   |          | -17.974 |         | -0.665 | -0.661 |	
+| poly(displacement, 2)2 |  9.672   |          |  10.185 |  8.535  |  0.606 |  0.453 |	
+| poly(horsepower, 2)1	 | -43.683  |          | -37.837 | -40.883 | -2.777 | -2.459 |
+| poly(horsepower, 2)2   |  18.315  |          |  18.423 |  17.476 |  1.063 |  1.074 |
+| poly(weight, 2)1	     | -71.146  | -109.779 | -48.931 | -73.207 | -2.900 | -3.157 |
+| poly(weight, 2)2	     |  15.645  |  32.047  |  13.333 |  16.432 |  0.659 |  0.739 |
+| acceleration           | -0.163   |          | -0.132  | -0.136  | -0.700 | -0.621 |
+| year                   |  0.783   |  0.828   |  0.706  |  0.781  |  2.819 |  2.854 |
+| as.factor(origin)2	   |  1.137   |          |  0.788  |  1.137  |  0.383 |  0.443 |
+| as.factor(origin)3	   |  1.217   |          |  1.246  |  1.219  |  0.495 |  0.536 |
+|------------------------|----------|----------|---------|---------|--------|--------|
+| Test Error             | 8.720    | 9.300    | 8.896   | 8.808   | 8.741  | 8.677  |
+
+The best-subset method gave us the simplest model, but this came at a cost. It also has the highest MSE. We see that the model from PLS gave us the lowest MSE at 8.677. I would recommend the model from (f) which was fitted using PLS since it has the lowest error rate among all 6 methods that we fitted.
