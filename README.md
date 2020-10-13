@@ -26,12 +26,12 @@ We ignore the **name** attribute as it is too varied to include in the model. We
 See what variables are useful in predicting the outcome. Perform transformations as required.
 ### Model Fitting
 Fit the model using:
-#### Standard Least Squares  
-#### Best-subset selection
-#### Ridge regression
-#### Lasso regularization
-#### Principal Component Regression (PCR)
-#### Partial Least Squares (PLS)
+1. Standard Least Squares  
+2. Best-subset selection
+3. Ridge regression
+4. Lasso regularization
+5. Principal Component Regression (PCR)
+6. Partial Least Squares (PLS)
 ### Comparision & Conclusions
 Compare coefficients, MSE, and find the best model.
 
