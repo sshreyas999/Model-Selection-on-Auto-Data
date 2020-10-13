@@ -23,13 +23,17 @@ We ignore the **name** attribute as it is too varied to include in the model. We
 
 ## Outline  
 ### Exploratory Analysis of Dataset
-### Standard Least Squares  
-### Best-subset selection
-### Ridge regression
-### Lasso regularization
-### Principal Component Regression (PCR)
-### Partial Least Squares (PLS)
+See what variables are useful in predicting the outcome. Perform transformations as required.
+### Model Fitting
+Fit the model using:
+#### Standard Least Squares  
+#### Best-subset selection
+#### Ridge regression
+#### Lasso regularization
+#### Principal Component Regression (PCR)
+#### Partial Least Squares (PLS)
 ### Comparision & Conclusions
+Compare coefficients, MSE, and find the best model.
 
 ## Conclusion
 The best model was achived through Partial Least Squares (PLS). It gave us the lowest MSE - 8.677.
